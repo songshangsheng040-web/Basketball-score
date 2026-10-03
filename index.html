@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#19469D">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="篮球记分">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>篮球记分战术系统</title>
+<style>
+*{box-sizing:border-box}
+html,body{height:100%;margin:0;padding:0;background:#f5f7fa;font-family:system-ui,sans-serif}
+.wrap{display:flex;flex-direction:column;height:100%;padding:12px;gap:12px;overflow-y:auto}
+.card{background:#fff;border-radius:14px;padding:14px;box-shadow:0 1px 8px rgba(0,0,0,0.08)}
+.title{font-size:17px;font-weight:bold;margin:0 0 10px 0}
+.row{display:flex;gap:8px}
+.btn-row{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+button{border:1px solid #19469D;background:#fff;padding:12px 4px;border-radius:12px;font-size:14px}
+.btn-danger{background:#D92121;color:#fff;border-color:#D92121}
+.btn-gray{background:#666;color:#fff;border-color:#666}
+.num-input{
+    width:100%;
+    border:2px solid #ddd;
+    border-radius:10px;
+    padding:12px;
+    text-align:center;
+    font-size:18px;
+    outline:none;
+}
+.warn-item{background:#ffedd5;border-radius:10px;padding:10px;margin-bottom:8px}
+</style>
+</head>
+<body>
+<div class="wrap">
+    <!-- 顶部控制 -->
+    <div class="row">
+        <button id="undoBtn" class="btn-gray" style="flex:1;padding:14px">撤销上一条</button>
+        <button id="clearAllBtn" class="btn-danger" style="flex:1;padding:14px">清空全部数据</button>
+    </div>
+
+    <!-- 球员输入 -->
+    <div class="card">
+        <div class="title">球员号码</div>
+        <input id="playerNumInput" class="num-input" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="输入号码，例如：11" maxlength="2">
+        <div style="margin-top:8px">当前选中：<span id="currentNum">无</span></div>
+    </div>
+
+    <!-- 进攻类型 -->
+    <div class="card">
+        <div class="title">选择进攻得分类型</div>
+        <div class="btn-row">
+            <button class="type-btn" data-point="3" data-type="三分球">三分球<br>3分</button>
+            <button class="type-btn" data-point="2" data-type="中投">中投<br>2分</button>
+            <button class="type-btn" data-point="2" data-type="篮下得分">篮下得分<br>2分</button>
+            <button class="type-btn" data-point="2" data-type="突破得分">突破得分<br>2分</button>
+            <button class="type-btn" data-point="2" data-type="快攻得分">快攻<br>2分</button>
+            <button class="type-btn" data-point="1" data-type="罚球得分">罚球<br>1分</button>
+        </div>
+    </div>
+
+    <!--【1.最重要】实时策略预警 -->
+    <div class="card" style="min-height:160px">
+        <div class="title" style="color:#FF7D00;border-bottom:1px solid #eee;padding-bottom:6px">实时策略预警</div>
+        <div id="strategyTipBox" style="overflow-y:auto"></div>
+    </div>
+
+    <!--【2】历史策略 -->
+    <div class="card">
+        <div class="title">历史策略记录</div>
+        <div id="historyTipBox" style="max-height:130px;overflow-y:auto;font-size:14px"></div>
+    </div>
+
+    <!--【3】全场得分流水（最底部） -->
+    <div class="card">
+        <div class="title">全场得分流水记录</div>
+        <div id="recordList" style="max-height:110px;overflow-y:auto;font-size:14px"></div>
+    </div>
+</div>
+
+<script>
+const RECORD_KEY = "basket_score_record";
+const STAT_KEY = "basket_full_stat";
+const HISTORY_KEY = "history_warn_log";
+
+let currentSelectNum = "";
+let scoreRecords = JSON.parse(localStorage.getItem(RECORD_KEY)) || [];
+let statData = JSON.parse(localStorage.getItem(STAT_KEY)) || {
+    player: {},
+    teamType: {},
+    teamNonThree: 0
+};
+let historyWarnLog = JSON.parse(localStorage.getItem(HISTORY_KEY)) || [];
+
+const numInput = document.getElementById("playerNumInput");
+const currentNumView = document.getElementById("currentNum");
+const undoBtn = document.getElementById("undoBtn");
+const clearAllBtn = document.getElementById("clearAllBtn");
+const historyTipBox = document.getElementById("historyTipBox");
+const strategyTipBox = document.getElementById("strategyTipBox");
+const recordListBox = document.getElementById("recordList");
+
+function saveStat(){
+    localStorage.setItem(STAT_KEY, JSON.stringify(statData));
+}
+function saveRecords(){
+    localStorage.setItem(RECORD_KEY, JSON.stringify(scoreRecords));
+}
+function saveHistoryLog(){
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(historyWarnLog));
+}
+
+function renderHistoryLog(){
+    if(historyWarnLog.length === 0){
+        historyTipBox.innerHTML = `<div style="color:#999">暂无历史策略</div>`;
+        return;
+    }
+    let html = "";
+    [...historyWarnLog].reverse().forEach(item=>{
+        html += `<div style="border-bottom:1px solid #eee;padding:4px 0">${item}</div>`;
+    })
+    historyTipBox.innerHTML = html;
+}
+
+function refreshCurrentNum() {
+    currentNumView.innerText = currentSelectNum || "无";
+}
+function clearPlayerInput(){
+    numInput.value = "";
+    currentSelectNum = "";
+    refreshCurrentNum();
+}
+
+function renderRecord() {
+    if(scoreRecords.length === 0) {
+        recordListBox.innerHTML = `<div style="color:#999">暂无得分记录</div>`;
+        return;
+    }
+    let html = "";
+    [...scoreRecords].reverse().forEach(item=>{
+        html += `<div style="border-bottom:1px solid #eee;padding:3px 0">[${item.time}] ${item.num}号 ${item.type} ${item.point}分</div>`;
+    })
+    recordListBox.innerHTML = html;
+}
+
+function refreshStrategyTip() {
+    const warnMsgList = [];
+    const resetActions = [];
+
+    Object.entries(statData.player).forEach(([num, d])=>{
+        if(d.total >=6){
+            const msg = `⚠️【${num}号】个人总分${d.total}分，重点盯防！`;
+            warnMsgList.push(msg);
+            resetActions.push(()=>{ d.total = 0; });
+        }
+        Object.entries(d.type).forEach(([type, pts])=>{
+            if(pts >=4){
+                const msg = `⚠️【${num}号】${type}合计${pts}分，限制该进攻手段！`;
+                warnMsgList.push(msg);
+                resetActions.push(()=>{ d.type[type] = 0; });
+            }
+        })
+        if(d.three > 2){
+            const msg = `⚠️【${num}号】三分命中${d.three}次，严防三分！`;
+            warnMsgList.push(msg);
+            resetActions.push(()=>{ d.three = 0; });
+        }
+    })
+
+    Object.entries(statData.teamType).forEach(([type, pts])=>{
+        if(pts >=4){
+            const msg = `⚠️全队【${type}】合计${pts}分，限制该进攻路线！`;
+            warnMsgList.push(msg);
+            resetActions.push(()=>{ statData.teamType[type] = 0; });
+        }
+    })
+
+    if(statData.teamNonThree >=6){
+        const msg = `⚠️全队非三分得分合计${statData.teamNonThree}分，收缩内线！`;
+        warnMsgList.push(msg);
+        resetActions.push(()=>{ statData.teamNonThree = 0; });
+    }
+
+    if(warnMsgList.length === 0) {
+        strategyTipBox.innerHTML = `<div style="color:#999">暂无预警信息</div>`;
+    }else{
+        let html = "";
+        const nowStr = new Date().toLocaleTimeString();
+        warnMsgList.forEach((msg)=>{
+            html += `<div class="warn-item">${msg}</div>`;
+            historyWarnLog.push(`[${nowStr}] ${msg}`);
+        })
+        strategyTipBox.innerHTML = html;
+        saveHistoryLog();
+        renderHistoryLog();
+    }
+    resetActions.forEach(fn=>fn());
+    saveStat();
+}
+
+function undoLastRecord(){
+    if(scoreRecords.length === 0) return;
+    const last = scoreRecords.pop();
+    const num = last.num;
+    const type = last.type;
+    const point = last.point;
+
+    const p = statData.player[num];
+    if(p){
+        p.total -= point;
+        if(type === "三分球") p.three -=1;
+        p.type[type] = (p.type[type] || 0) - point;
+        if(p.type[type] <=0) delete p.type[type];
+        if(p.total <=0){
+            delete statData.player[num];
+        }
+    }
+    statData.teamType[type] = (statData.teamType[type] || 0) - point;
+    if(statData.teamType[type] <=0) delete statData.teamType[type];
+
+    const nonThreeList = ["中投","篮下得分","突破得分","罚球得分"];
+    if(nonThreeList.includes(type)){
+        statData.teamNonThree -= point;
+    }
+
+    saveRecords();
+    saveStat();
+    renderRecord();
+    refreshStrategyTip();
+}
+
+numInput.addEventListener("input", function(){
+    this.value = this.value.replace(/[^0-9]/g,'');
+    currentSelectNum = this.value.trim();
+    refreshCurrentNum();
+})
+undoBtn.onclick = undoLastRecord;
+clearAllBtn.onclick = function(){
+    if(!confirm("确认清空所有数据？无法恢复！")) return;
+    scoreRecords = [];
+    statData = {player:{}, teamType:{}, teamNonThree:0};
+    historyWarnLog = [];
+    saveRecords();
+    saveStat();
+    saveHistoryLog();
+    renderRecord();
+    renderHistoryLog();
+    refreshStrategyTip();
+}
+
+document.querySelectorAll(".type-btn").forEach(btn=>{
+    btn.addEventListener("click", ()=>{
+        if(!currentSelectNum) {
+            alert("先填写球员号码！");
+            return;
+        }
+        const point = Number(btn.dataset.point);
+        const type = btn.dataset.type;
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString();
+
+        const record = {time:timeStr, num:currentSelectNum, type, point};
+        scoreRecords.push(record);
+        saveRecords();
+
+        if(!statData.player[currentSelectNum]){
+            statData.player[currentSelectNum] = {total:0, three:0, type:{}};
+        }
+        const p = statData.player[currentSelectNum];
+        p.total += point;
+        if(type === "三分球") p.three +=1;
+        if(!p.type[type]) p.type[type] = 0;
+        p.type[type] += point;
+
+        if(!statData.teamType[type]) statData.teamType[type] = 0;
+        statData.teamType[type] += point;
+
+        const nonThreeList = ["中投","篮下得分","突破得分","罚球得分"];
+        if(nonThreeList.includes(type)){
+            statData.teamNonThree += point;
+        }
+
+        saveStat();
+        renderRecord();
+        refreshStrategyTip();
+        clearPlayerInput();
+    })
+})
+
+renderRecord();
+renderHistoryLog();
+refreshCurrentNum();
+refreshStrategyTip();
+</script>
+<script>
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js").catch(console.error);
+  });
+}
+</script>
+</body>
+</html>
