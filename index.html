@@ -151,7 +151,7 @@ function refreshStrategyTip() {
     const resetActions = [];
 
     Object.entries(statData.player).forEach(([num, d])=>{
-        if(d.total >=6){
+        if(d.total >=8){
             const msg = `⚠️【${num}号】个人总分${d.total}分，重点盯防！`;
             warnMsgList.push(msg);
             resetActions.push(()=>{ d.total = 0; });
